@@ -109,6 +109,7 @@ import org.bouncycastle.pkcs.PKCS10CertificationRequest;
 import org.bouncycastle.pkcs.PKCS10CertificationRequestBuilder;
 import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequest;
 import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequestBuilder;
+import org.bouncycastle.util.CollectionStore;
 import org.bouncycastle.util.Store;
 import org.bouncycastle.util.encoders.Base64;
 import org.bouncycastle.util.encoders.Hex;
@@ -532,7 +533,7 @@ public class MyCode extends CodeV3 {
             KeyStore keyStoreToExport = KeyStore.getInstance("PKCS12", "BC");
             keyStoreToExport.load(null, string2.toCharArray());
             java.security.cert.Certificate[] cert_list = keyStore.getCertificateChain(string);
-            DSAPrivateKey pKey = (DSAPrivateKey) keyStore.getKey(string, null);
+            PrivateKey pKey = (PrivateKey) keyStore.getKey(string, null);
  
             keyStoreToExport.setKeyEntry(string, pKey, password.toCharArray(), cert_list);
             
@@ -677,10 +678,13 @@ public class MyCode extends CodeV3 {
 
     @Override
     public boolean signCSR(String file, String keypair_name, String algorithm) {
+
         try {
             X509Certificate ca = (X509Certificate) keyStore.getCertificate(keypair_name);
             X500Name issuer = new X500Name(ca.getSubjectX500Principal().getName());
             PrivateKey caKey = (PrivateKey) keyStore.getKey(keypair_name, null);
+            
+            System.out.println(issuer.toString());
             
            
             JcaX509CertificateHolder caHolder = new JcaX509CertificateHolder(ca);
@@ -689,14 +693,10 @@ public class MyCode extends CodeV3 {
             Date to = access.getNotAfter();
             BigInteger serial = new BigInteger(access.getSerialNumber());
             
-            //X509v3CertificateBuilder certgen = new X509v3CertificateBuilder(issuer, serial, from, to, csr.getSubject(), csr.getSubjectPublicKeyInfo());
-            JcaX509v3CertificateBuilder certgen = new JcaX509v3CertificateBuilder(caHolder.getIssuer(), serial, from, to, csr.getSubject(), csr.getPublicKey());
-           /*certgen.addExtension(Extension.basicConstraints, false, new BasicConstraints(false));
             
-            certgen.addExtension(Extension.subjectKeyIdentifier, false, csr.getSubjectPublicKeyInfo());
-            certgen.addExtension(Extension.authorityKeyIdentifier, false, new AuthorityKeyIdentifier(new GeneralNames(new GeneralName(new X509Name(ca.getSubjectX500Principal().getName()))), ca.getSerialNumber()));*/
-            
-            
+            JcaX509v3CertificateBuilder certgen = new JcaX509v3CertificateBuilder(caHolder.getSubject(), serial, from, to, csr.getSubject(), csr.getPublicKey());
+
+
            
             // Subject Alternate Names
             if (access.isCritical(Constants.SAN)) {
@@ -737,40 +737,10 @@ public class MyCode extends CodeV3 {
             
             
             
-            /*if (access.isCritical(Constants.AKID)) {
-                SubjectPublicKeyInfo CAsubjectInfo = SubjectPublicKeyInfo.getInstance(ca.getPublicKey().getEncoded());
-                
-                AuthorityKeyIdentifier a = new AuthorityKeyIdentifier(
-                CAsubjectInfo,
-                new GeneralNames(new GeneralName(new X509Name(ca.getSubjectX500Principal().toString()))),
-                serial
-                );
-                
-                certgen.addExtension(Extension.authorityKeyIdentifier, access.isCritical(Constants.AKID), a);
-            }*/
-            
-            
-            
-            
-            
             AlgorithmIdentifier sigAlgId = new DefaultSignatureAlgorithmIdentifierFinder().find(algorithm);
             AlgorithmIdentifier digAlgId = new DefaultDigestAlgorithmIdentifierFinder().find(sigAlgId);
             
-            
-            
-//            ContentSigner signer = new BcRSAContentSignerBuilder(sigAlgId, digAlgId).build(PrivateKeyFactory.createKey(caKey.getEncoded()));
-//            X509CertificateHolder holder = certgen.build(signer);
-//            byte[] certencoded = holder.toASN1Structure().getEncoded();
-//            
-//            
-//            CMSSignedDataGenerator generator = new CMSSignedDataGenerator();
-//            
-//            signer = new JcaContentSignerBuilder("SHA1withRSA").setProvider("BC").build(caKey);
-//            generator.addSignerInfoGenerator(new JcaSignerInfoGeneratorBuilder(new JcaDigestCalculatorProviderBuilder().build()).build(signer, ca));
-//            generator.addCertificate(new X509CertificateHolder(certencoded));
-//            generator.addCertificate(new X509CertificateHolder(ca.getEncoded()));
-//            CMSTypedData content = new CMSProcessableByteArray(certencoded);
-//            CMSSignedData signeddata = generator.generate(content, true);
+
 
             CMSSignedDataGenerator cmsSignedDataGenerator = new CMSSignedDataGenerator();
             ContentSigner sha1Signer = new JcaContentSignerBuilder(algorithm).setProvider("BC").build(caKey);
@@ -786,22 +756,16 @@ public class MyCode extends CodeV3 {
             
             byte[] certencoded = holder.toASN1Structure().getEncoded();
             
-            cmsSignedDataGenerator.addCertificate(holder);
+            //cmsSignedDataGenerator.addCertificate(holder);
             
             java.security.cert.Certificate[] cert_array = keyStore.getCertificateChain(keypair_name);
-            for(java.security.cert.Certificate cert_instance: cert_array){
-                X509Certificate x509=(X509Certificate)cert_instance;
-                X509CertificateHolder hold = new JcaX509CertificateHolder(x509);
-                cmsSignedDataGenerator.addCertificate(hold);
-                System.out.println("A");
-            }
-            
-            /*cmsSignedDataGenerator.addCertificate(new JcaX509CertificateHolder(ca);
-            cmsSignedDataGenerator.addCertificate(holder);*/
+ 
             
             CMSTypedData chainMessage = new CMSProcessableByteArray(certencoded);
             System.out.println(certencoded);
             CMSSignedData signeddata = cmsSignedDataGenerator.generate(chainMessage, false);
+            
+            System.out.println(cmsSignedDataGenerator.toString());
             
             FileOutputStream out = new FileOutputStream(file);
             JcaPEMWriter pemWriter = new JcaPEMWriter(new OutputStreamWriter(out));
@@ -809,21 +773,13 @@ public class MyCode extends CodeV3 {
             JcaX509CertificateConverter jcaConverter = new JcaX509CertificateConverter();
             X509Certificate out_cert = jcaConverter.getCertificate(holder);
             pemWriter.writeObject(out_cert);
-            pemWriter.writeObject(caHolder);
+            for(java.security.cert.Certificate cert_instance: cert_array){
+                
+                pemWriter.writeObject(cert_instance);
+            }
             pemWriter.close();
             
-           /* System.out.println("A");
-            System.out.println(out_cert);
-            System.out.println(caHolder);*/
-            //ByteArrayOutputStream out = new ByteArrayOutputStream();
-            //out.write("-----BEGIN PKCS #7 SIGNED DATA-----\n".getBytes("ISO-8859-1"));
-            //out.write(Base64.encode(signeddata.getEncoded()));
-            //out.write("\n-----END PKCS #7 SIGNED DATA-----\n".getBytes("ISO-8859-1"));
-            //out.close();
-            
-            /*FileOutputStream outFile = new FileOutputStream(string);
-            out.writeTo(outFile);
-            outFile.close();*/
+
             return true;
         } catch (KeyStoreException ex) {
             Logger.getLogger(MyCode.class.getName()).log(Level.SEVERE, null, ex);
@@ -862,7 +818,7 @@ public class MyCode extends CodeV3 {
             
             Collection<? extends java.security.cert.Certificate> coll = certificateFactory.generateCertificates(in);
             
-            System.out.println("BROJ "+coll.size());
+            //System.out.println(coll.toString());
             
             java.security.cert.Certificate[] certificates = (java.security.cert.Certificate[]) coll.toArray(new java.security.cert.Certificate[coll.size()]);
             
@@ -870,28 +826,9 @@ public class MyCode extends CodeV3 {
             PrivateKey k = (PrivateKey) keyStore.getKey(keypair_name, null);
             keyStore.setKeyEntry(keypair_name, k, null, (java.security.cert.Certificate[]) certificates);
             
+            
             updateKeyStore();
             return true;
-            
-            /*byte fileContent[] = new byte[(int)file.length()];
-            in.read(fileContent);*/
-            //String s = new String(fileContent);
-
-           /* InputStream signatureIn = new ByteArrayInputStream(fileContent);
-            ASN1Primitive obj = new ASN1InputStream(signatureIn).readObject();
-            //ContentInfo contentInfo = ContentInfo.getInstance(obj);
-            
-            System.out.println(obj);*/
-            
-            
-            /*PKCS7 pkcs7 = new PKCS7(fileContent);
-            System.out.println(pkcs7);*/
-            
-            /*CMSSignedData s = new CMSSignedData(fileContent);
-            System.out.println(s);*/
-            
-            
-            
 
 
         } catch (FileNotFoundException ex) {

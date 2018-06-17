@@ -1,0 +1,6 @@
+DSA
+RSA
+basic constraints
+authority key identifier
+subject key identifier
+subject alternative name
