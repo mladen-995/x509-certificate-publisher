@@ -192,7 +192,7 @@ public class MyCode extends CodeV3 {
             
             Set<String> critical_extensions = cert.getCriticalExtensionOIDs();
             
-            System.out.println(keyStore.getCertificateChain(string).length);
+            //System.out.println(keyStore.getCertificateChain(string).length);
             
             // KRITICNE EKSTENZIJE
             if (critical_extensions != null)
@@ -271,7 +271,7 @@ public class MyCode extends CodeV3 {
                 if (aki_bytes != null) {
                 AuthorityKeyIdentifier aki = AuthorityKeyIdentifier.getInstance(X509ExtensionUtil.fromExtensionValue(aki_bytes));
                 if (aki != null){
-                    access.setAuthorityIssuer(aki.getAuthorityCertIssuer().toString());
+                    access.setAuthorityIssuer(aki.getAuthorityCertIssuer().getNames()[0].getName().toString());
                     String keyIdentifierHex = new String(Hex.encode(aki.getKeyIdentifier()));
                     access.setAuthorityKeyID(keyIdentifierHex);
                     access.setAuthoritySerialNumber(aki.getAuthorityCertSerialNumber().toString());
@@ -302,30 +302,24 @@ public class MyCode extends CodeV3 {
             access.setSerialNumber(cert.getSerialNumber().toString());
 
             
+            // da li je trusted
             if (keyStore.isCertificateEntry(string))
                 return 2;
             
             
-            /*java.security.cert.Certificate[] cert_array = keyStore.getCertificateChain(string);
+            java.security.cert.Certificate[] cert_array = keyStore.getCertificateChain(string);
             for(java.security.cert.Certificate cert_ca: cert_array){
                 PublicKey pb_ca = cert_ca.getPublicKey();
                 try {
                     cert.verify(pb_ca);
-                } catch (CertificateException ex) {
-                    Logger.getLogger(MyCode.class.getName()).log(Level.SEVERE, null, ex);
-                } catch (NoSuchAlgorithmException ex) {
-                    Logger.getLogger(MyCode.class.getName()).log(Level.SEVERE, null, ex);
-                } catch (InvalidKeyException ex) {
-                    Logger.getLogger(MyCode.class.getName()).log(Level.SEVERE, null, ex);
-                } catch (NoSuchProviderException ex) {
-                    Logger.getLogger(MyCode.class.getName()).log(Level.SEVERE, null, ex);
-                } catch (SignatureException ex) {
-                    Logger.getLogger(MyCode.class.getName()).log(Level.SEVERE, null, ex);
+                } catch (Exception ex) {
+                    // potpisan
+                    return 1;
                 }
-                System.out.println(cert_ca == cert);
-            }*/
+            }
             
-            return 1;
+            //nije potpisan
+            return 0;
             
             
             
@@ -337,7 +331,7 @@ public class MyCode extends CodeV3 {
         } catch (IOException ex) {
             Logger.getLogger(MyCode.class.getName()).log(Level.SEVERE, null, ex);
         }
-        return 0;
+        return -1;
     }
 
     @Override
@@ -363,21 +357,8 @@ public class MyCode extends CodeV3 {
             
             SubjectPublicKeyInfo publicKeyInfo = new SubjectPublicKeyInfo(ASN1Sequence.getInstance(keyPair.getPublic().getEncoded())); 
             
-            String subjectName = "";
-            if (! access.getSubjectCommonName().equals(""))
-                subjectName += "CN="+access.getSubjectCommonName();
-            if (! access.getSubjectCountry().equals(""))
-                subjectName += ((subjectName.length()>0) ? "," : "") + "C="+access.getSubjectCountry();
-            if (! access.getSubjectState().equals(""))
-                subjectName += ((subjectName.length()>0) ? "," : "") + "ST="+access.getSubjectState();
-            if (! access.getSubjectLocality().equals(""))
-                subjectName += ((subjectName.length()>0) ? "," : "") + "L="+access.getSubjectLocality();
-            if (! access.getSubjectOrganization().equals(""))
-                subjectName += ((subjectName.length()>0) ? "," : "") + "O="+access.getSubjectOrganization();
-            if (! access.getSubjectOrganizationUnit().equals(""))
-                subjectName += ((subjectName.length()>0) ? "," : "") + "OU="+access.getSubjectOrganizationUnit();
            
-            X500Principal name = new X500Principal(subjectName);
+            X500Principal name = new X500Principal(access.getSubject());
            
             X509v3CertificateBuilder x509Builder = new JcaX509v3CertificateBuilder(name, serialNumber, notBefore, notAfter, name, publicKey);
             
@@ -394,12 +375,19 @@ public class MyCode extends CodeV3 {
             
             
             // Basic Constraints
-            if (access.isCritical(Constants.BC)) {
-                if (access.isCA())
-                    x509Builder.addExtension(Extension.basicConstraints, access.isCritical(Constants.BC), new BasicConstraints(Integer.parseInt(access.getPathLen())));
+            if (access.isCA()) {
+                int path_length;
+                if (access.getPathLen().equals(""))
+                    path_length = 0;
                 else
-                    x509Builder.addExtension(Extension.basicConstraints, access.isCritical(Constants.BC), new BasicConstraints(false));
+                    path_length = Integer.parseInt(access.getPathLen());
+               
+                x509Builder.addExtension(Extension.basicConstraints, access.isCritical(Constants.BC), new BasicConstraints(path_length));
             }
+                
+            else
+                x509Builder.addExtension(Extension.basicConstraints, access.isCritical(Constants.BC), new BasicConstraints(false));
+
             
             
             // Subject Key Identfier
@@ -564,6 +552,7 @@ public class MyCode extends CodeV3 {
         try {
             X509Certificate cert = (X509Certificate) CertificateFactory.getInstance("X.509", "BC")
                     .generateCertificate(new FileInputStream(file));
+            System.out.println(cert);
             keyStore.setCertificateEntry(keypair_name, cert);
             updateKeyStore();
             return true;
@@ -708,10 +697,21 @@ public class MyCode extends CodeV3 {
                 certgen.addExtension(Extension.subjectAlternativeName, access.isCritical(Constants.SAN), subjectAltNames);
             }
             
+
+            
+            
                       
             // Basic Constraints
-            if (access.isCA())
-                certgen.addExtension(Extension.basicConstraints, access.isCritical(Constants.BC), new BasicConstraints(Integer.parseInt(access.getPathLen())));
+            if (access.isCA()){
+                int path_length;
+                if (access.getPathLen().equals(""))
+                    path_length = 0;
+                else
+                    path_length = Integer.parseInt(access.getPathLen());
+                
+                certgen.addExtension(Extension.basicConstraints, access.isCritical(Constants.BC), new BasicConstraints(path_length));
+            }
+                
             else
                 certgen.addExtension(Extension.basicConstraints, access.isCritical(Constants.BC), new BasicConstraints(false));
             
